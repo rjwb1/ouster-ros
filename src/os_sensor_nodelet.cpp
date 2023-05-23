@@ -17,6 +17,7 @@
 #include <fstream>
 #include <string>
 #include <tuple>
+#include <thread>
 
 #include "ouster_ros/GetConfig.h"
 #include "ouster_ros/PacketMsg.h"
@@ -49,7 +50,12 @@ class OusterSensor : public OusterClientBase {
         create_get_metadata_service(nh);
         create_get_config_service(nh);
         create_set_config_service(nh);
-        start_connection_loop(nh);
+        start_sensor_connection_thread();
+    }
+
+    ~OusterSensor()
+    {
+        stop_sensor_connection_thread();
     }
 
     std::string get_sensor_hostname(ros::NodeHandle& nh) {
@@ -427,6 +433,24 @@ class OusterSensor : public OusterClientBase {
             true);
     }
 
+    void start_sensor_connection_thread() {
+        sensor_connection_active = true;
+        sensor_connection_thread = std::make_unique<std::thread>([this]() {
+            auto& pf = sensor::get_format(info);
+            while (sensor_connection_active) {
+                connection_loop(*sensor_client, pf);
+            }
+            ROS_INFO("connection_loop DONE.");
+        });
+    }
+
+    void stop_sensor_connection_thread() {
+        if (sensor_connection_thread->joinable()) {
+            sensor_connection_active = false;
+            sensor_connection_thread->join();
+        }
+    }
+
     void connection_loop(sensor::client& cli, const sensor::packet_format& pf) {
         auto state = sensor::poll_client(cli);
         if (state == sensor::EXIT) {
@@ -460,6 +484,8 @@ class OusterSensor : public OusterClientBase {
     std::string cached_config;
     std::string mtp_dest;
     bool mtp_main;
+    std::unique_ptr<std::thread> sensor_connection_thread;
+    std::atomic<bool> sensor_connection_active = {false};
 };
 
 }  // namespace nodelets_os
