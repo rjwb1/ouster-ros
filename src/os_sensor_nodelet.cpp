@@ -50,6 +50,8 @@ class OusterSensor : public OusterClientBase {
         create_get_metadata_service(nh);
         create_get_config_service(nh);
         create_set_config_service(nh);
+        allocate_buffers();
+        create_publishers(nh);
         start_sensor_connection_thread();
     }
 
@@ -412,25 +414,6 @@ class OusterSensor : public OusterClientBase {
         auto& pf = sensor::get_format(info);
         lidar_packet.buf.resize(pf.lidar_packet_size + 1);
         imu_packet.buf.resize(pf.imu_packet_size + 1);
-    }
-
-    void create_publishers(ros::NodeHandle& nh) {
-        lidar_packet_pub = nh.advertise<PacketMsg>("lidar_packets", 1280);
-        imu_packet_pub = nh.advertise<PacketMsg>("imu_packets", 100);
-    }
-
-    void start_connection_loop(ros::NodeHandle& nh) {
-        allocate_buffers();
-        create_publishers(nh);
-        timer_ = nh.createTimer(
-            ros::Duration(0),
-            [this](const ros::TimerEvent&) {
-                auto& pf = sensor::get_format(info);
-                connection_loop(*sensor_client, pf);
-                timer_.stop();
-                timer_.start();
-            },
-            true);
     }
 
     void start_sensor_connection_thread() {
