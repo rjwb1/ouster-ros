@@ -18,6 +18,7 @@
 #include <string>
 #include <tuple>
 #include <thread>
+#include <boost/thread/mutex.hpp>
 
 #include "ouster_ros/GetConfig.h"
 #include "ouster_ros/PacketMsg.h"
@@ -46,13 +47,13 @@ class OusterSensor : public OusterClientBase {
         create_metadata_publisher(nh);
         update_config_and_metadata(*sensor_client);
         publish_metadata();
-        save_metadata(pnh);
+        // save_metadata(pnh);
         create_get_metadata_service(nh);
         create_get_config_service(nh);
         create_set_config_service(nh);
-        allocate_buffers();
-        create_publishers(nh);
+        ros::Duration(1.0).sleep(); // sleep for a second
         start_sensor_connection_thread();
+        NODELET_INFO("Ouster Ready!");
     }
 
     ~OusterSensor()
@@ -416,14 +417,22 @@ class OusterSensor : public OusterClientBase {
         imu_packet.buf.resize(pf.imu_packet_size + 1);
     }
 
+    void create_publishers(ros::NodeHandle& nh) {
+        lidar_packet_pub = std::make_unique<ros::Publisher>(nh.advertise<PacketMsg>("lidar_packets", 1280));
+        imu_packet_pub = std::make_unique<ros::Publisher>(nh.advertise<PacketMsg>("imu_packets", 100));
+    }
+
     void start_sensor_connection_thread() {
         sensor_connection_active = true;
         sensor_connection_thread = std::make_unique<std::thread>([this]() {
+            allocate_buffers();
+            auto& nh = getNodeHandle();
+            create_publishers(nh);
             auto& pf = sensor::get_format(info);
             while (sensor_connection_active) {
                 connection_loop(*sensor_client, pf);
             }
-            ROS_INFO("connection_loop DONE.");
+            NODELET_INFO("connection_loop DONE.");
         });
     }
 
@@ -435,6 +444,7 @@ class OusterSensor : public OusterClientBase {
     }
 
     void connection_loop(sensor::client& cli, const sensor::packet_format& pf) {
+        boost::mutex::scoped_lock lock(connection_mutex);
         auto state = sensor::poll_client(cli);
         if (state == sensor::EXIT) {
             NODELET_INFO("poll_client: caught signal, exiting");
@@ -446,19 +456,19 @@ class OusterSensor : public OusterClientBase {
         }
         if (state & sensor::LIDAR_DATA) {
             if (sensor::read_lidar_packet(cli, lidar_packet.buf.data(), pf))
-                lidar_packet_pub.publish(lidar_packet);
+                lidar_packet_pub->publish(lidar_packet);
         }
         if (state & sensor::IMU_DATA) {
             if (sensor::read_imu_packet(cli, imu_packet.buf.data(), pf))
-                imu_packet_pub.publish(imu_packet);
+                imu_packet_pub->publish(imu_packet);
         }
     }
 
    private:
     PacketMsg lidar_packet;
     PacketMsg imu_packet;
-    ros::Publisher lidar_packet_pub;
-    ros::Publisher imu_packet_pub;
+    std::unique_ptr<ros::Publisher> lidar_packet_pub;
+    std::unique_ptr<ros::Publisher> imu_packet_pub;
     std::shared_ptr<sensor::client> sensor_client;
     ros::Timer timer_;
     std::string sensor_hostname;
@@ -469,6 +479,7 @@ class OusterSensor : public OusterClientBase {
     bool mtp_main;
     std::unique_ptr<std::thread> sensor_connection_thread;
     std::atomic<bool> sensor_connection_active = {false};
+    boost::mutex connection_mutex;
 };
 
 }  // namespace nodelets_os
