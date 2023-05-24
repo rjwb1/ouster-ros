@@ -86,6 +86,13 @@ add_library(nodelets_os
 target_link_libraries(nodelets_os ouster_ros ${catkin_LIBRARIES})
 add_dependencies(nodelets_os ${PROJECT_NAME}_gencpp)
 
+
+add_executable(ouster_node
+  src/os_node.cpp
+  )
+  target_link_libraries(ouster_node ouster_ros ${catkin_LIBRARIES})
+  add_dependencies(ouster_node ${PROJECT_NAME}_gencpp)
+  
 # ==== Install ====
 install(
   TARGETS
